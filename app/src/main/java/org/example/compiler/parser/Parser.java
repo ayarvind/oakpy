@@ -41,6 +41,14 @@ public class Parser {
         if (checkKeyword("for")) {
             return parseForStatement();
         }
+        if(match(TokenType.KEYWORD, "break")) {
+            consume(TokenType.DELIMITER, ";");
+            return (StatementNode) new BreakStatement();
+        }
+        if (match(TokenType.KEYWORD, "continue")) {
+            consume(TokenType.DELIMITER, ";");
+            return (StatementNode) new ContinueStatement();
+        }
 
         if (match(TokenType.KEYWORD, "var")) {
             String name = consume(TokenType.IDENTIFIER).getValue();
@@ -148,7 +156,6 @@ public class Parser {
     private ExpressionNode parseExpression() {
         return parseAssignment();
     }
-    
 
     private ExpressionNode parseLogicalOr() {
         ExpressionNode expr = parseLogicalAnd();
@@ -242,10 +249,25 @@ public class Parser {
     }
 
     private ExpressionNode parseMultiplication() {
-        ExpressionNode expr = parseUnary();
-        while (match(TokenType.OPERATOR, "*") || match(TokenType.OPERATOR, "/") || match(TokenType.OPERATOR, "%")) {
+        ExpressionNode expr = parseExponent();
+        // while (match(TokenType.OPERATOR, "*", "/", "%", "//")) {
+        //     String operator = previous().getValue();
+        //     ExpressionNode right = parseExponent();
+        //     expr = new BinaryExpression(expr, operator, right);
+        // }
+        while (match(TokenType.OPERATOR, "*") || match(TokenType.OPERATOR, "/") || match(TokenType.OPERATOR, "%") || match(TokenType.OPERATOR, "//")) {
             String operator = previous().getValue();
-            ExpressionNode right = parseUnary();
+            ExpressionNode right = parseExponent();
+            expr = new BinaryExpression(expr, operator, right);
+        }
+        return expr;
+    }
+
+    private ExpressionNode parseExponent() {
+        ExpressionNode expr = parseUnary();
+        while (match(TokenType.OPERATOR, "**")) {
+            String operator = previous().getValue();
+            ExpressionNode right = parseExponent(); // right-associative, call itself
             expr = new BinaryExpression(expr, operator, right);
         }
         return expr;

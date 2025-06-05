@@ -7,6 +7,11 @@ import java.util.List;
 import java.util.Map;
 
 public class Interpreter {
+    private static class ContinueException extends RuntimeException {
+    }
+
+    private static class BreakException extends RuntimeException {
+    }
 
     private final Map<String, ClassDeclaration> classes = new HashMap<>();
     private Map<String, Object> locals;
@@ -75,19 +80,27 @@ public class Interpreter {
     }
 
     private void executeForLoop(ForStatement forStmt, String currentClassName) {
-        // 1. Execute initialization statement
         if (forStmt.getInit() != null) {
             executeStatement(forStmt.getInit(), currentClassName);
         }
 
-        // 2. Loop while condition is truthy
-        while (Utility.isTruthy(evaluateExpression(forStmt.getCondition(), currentClassName))) {
-            // Execute loop body
-            for (StatementNode stmt : forStmt.getBody()) {
-                executeStatement(stmt, currentClassName);
+        loop: while (Utility.isTruthy(evaluateExpression(forStmt.getCondition(), currentClassName))) {
+            try {
+                for (StatementNode stmt : forStmt.getBody()) {
+                    try {
+                        executeStatement(stmt, currentClassName);
+                    } catch (ContinueException ce) {
+                        // skip rest of loop body, continue next iteration
+                        break;
+                    } catch (BreakException be) {
+                        // exit the loop entirely
+                        break loop;
+                    }
+                }
+            } catch (BreakException be) {
+                break;
             }
 
-            // Execute update expression after each iteration
             if (forStmt.getIncrement() != null) {
                 evaluateExpression(forStmt.getIncrement(), currentClassName);
             }
@@ -119,11 +132,21 @@ public class Interpreter {
         } else if (stmt instanceof IfStatement ifStatement) {
             executeIfStatement(ifStatement, currentClassName);
         } else if (stmt instanceof WhileStatement whileStmt) {
-            while (Utility.isTruthy(evaluateExpression(whileStmt.getCondition(), currentClassName))) {
-                executeBlock(whileStmt.getBody(), currentClassName);
+            loop: while (Utility.isTruthy(evaluateExpression(whileStmt.getCondition(), currentClassName))) {
+                try {
+                    executeBlock(whileStmt.getBody(), currentClassName);
+                } catch (ContinueException ce) {
+                    continue;
+                } catch (BreakException be) {
+                    break loop;
+                }
             }
         } else if (stmt instanceof ForStatement forStmt) {
             executeForLoop(forStmt, currentClassName);
+        } else if (stmt instanceof ContinueStatement) {
+            throw new ContinueException();
+        } else if (stmt instanceof BreakStatement) {
+            throw new BreakException();
         }
 
         else {
@@ -134,7 +157,7 @@ public class Interpreter {
     private Object executeBlock(List<StatementNode> statements, String currentClassName) {
         Object lastResult = null;
         for (StatementNode stmt : statements) {
-            executeStatement(stmt, currentClassName); // Passing null for currentClassName, or change if needed
+            executeStatement(stmt, currentClassName);
         }
         return lastResult;
     }
@@ -208,6 +231,12 @@ public class Interpreter {
                             throw new ArithmeticException("Division by zero");
                         yield l / r;
                     }
+                    case "**" -> {
+                        if (r < 0)
+                            throw new ArithmeticException("Negative exponent not supported for integers");
+                        yield (int) Math.pow(l, r);
+                    }
+
                     case "%" -> {
                         if (r == 0)
                             throw new ArithmeticException("Modulus by zero");
@@ -247,6 +276,12 @@ public class Interpreter {
                             throw new ArithmeticException("Division by zero");
                         yield dl / dr;
                     }
+                    case "**" -> {
+                        if (dr < 0)
+                            throw new ArithmeticException("Negative exponent not supported for doubles");
+                        yield Math.pow(dl, dr);
+                    }
+
                     case "%" -> {
                         if (dr == 0.0)
                             throw new ArithmeticException("Modulus by zero");
