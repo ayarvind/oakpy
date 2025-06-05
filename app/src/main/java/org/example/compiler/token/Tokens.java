@@ -6,18 +6,20 @@ public class Tokens {
 
     public static final Set<String> KEYWORDS = Set.of(
             "class", "interface", "const", "var", "def",
-            "if", "else", "while", "for", "switch",
-            "case", "return", "print"
-    );
+            "if", "else", "while", "for", "switch","in",
+            "break", "continue", "throw", "try", "catch",
+            "finally", "import", "export", "new", "this", "super",
+
+            "case", "return", "print");
 
     public static final Set<String> OPERATORS = Set.of(
             "+", "-", "*", "/", "%", "=", "==", "!=", "<", "<=",
-            ">", ">=", "&&", "||", "!", "::"
-    );
-
+            ">", ">=", "&&", "||", "!", "~", "::", "<<", ">>", ">>>",
+            "&", "|", "^",
+            "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
+            "++", "--");
     public static final Set<Character> DELIMITERS = Set.of(
-            '(', ')', '{', '}', '[', ']', ',', ':', ';'
-    );
+            '(', ')', '{', '}', '[', ']', ',', ':', ';','.','?');
 
     public static boolean isKeyword(String word) {
         return KEYWORDS.contains(word);

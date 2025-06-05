@@ -48,16 +48,19 @@ public class Compiler {
             // 1. Tokenize
             Lexer lexer = new Lexer(oakCode);
             List<Token> tokens = lexer.tokenize();
+            // print tokens for debugging
+            // print all tokens
 
             // 2. Parse to AST
-            Parser parser = new Parser(tokens);
-            ClassDeclaration classNode = parser.parseClass();
 
-            // 3. Interpret the AST
-            Interpreter interpreter = new Interpreter();
-            try{
+            try {
+                Parser parser = new Parser(tokens);
+                ClassDeclaration classNode = parser.parseClass();
+
+                // 3. Interpret the AST
+                Interpreter interpreter = new Interpreter();
                 interpreter.executeProgram(List.of(classNode));
-            }catch(Exception e){
+            } catch (Exception e) {
                 System.out.println(e.getMessage());
             }
         } else {

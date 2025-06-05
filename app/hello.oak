@@ -1,9 +1,13 @@
-class Ritik{
-    var a = 10;
-    var b = 20;
-    def name(){
-        var result = a + b;
-        print(result);
-        print("Ritik is a good");
+class Ritik {
+    def sum(a, b) {
+        return a + b;
+    }
+
+    def main() {
+        var i=0;
+        while(i<10){
+            print(i);
+            i++;
+        }
     }
 }

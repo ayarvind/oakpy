@@ -103,7 +103,7 @@ public class Lexer {
                 tokens.add(new Token(TokenType.OPERATOR, sb.toString(), line));
                 return;
             }
-            sb.setLength(1); // fallback to single-char operator
+            sb.setLength(1); 
         }
 
         tokens.add(new Token(TokenType.OPERATOR, sb.toString(), line));

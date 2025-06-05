@@ -8,38 +8,23 @@ import java.util.Map;
 
 public class Interpreter {
 
-    // Map class name to ClassDeclaration AST node
     private final Map<String, ClassDeclaration> classes = new HashMap<>();
-
-    // Current function's local variable environment (simple)
     private Map<String, Object> locals;
 
-    /**
-     * Executes the main program body. Registers all classes and then runs the main method.
-     * @param programBody A list of statement nodes representing the program's top-level structure.
-     */
     public void executeProgram(List<StatementNode> programBody) {
-        // Register all classes by mapping their names to their AST nodes
         for (StatementNode stmt : programBody) {
             if (stmt instanceof ClassDeclaration cls) {
                 classes.put(cls.name(), cls);
             }
         }
-        // After registering classes, run the main method
         runMain();
     }
 
-    /**
-     * Locates and executes the 'main' method within the registered classes.
-     * Throws a RuntimeException if no main method is found.
-     */
     private void runMain() {
         for (ClassDeclaration cls : classes.values()) {
             for (StatementNode member : cls.body()) {
                 if (member instanceof FunctionDeclaration func && func.name().equals("main")) {
-                    System.out.println("Running main in class " + cls.name());
-                    // Call the main method, passing its class name dynamically
-                    callMethod(cls.name(), "main");
+                    Object result = callMethod(cls.name(), "main");
                     return;
                 }
             }
@@ -47,226 +32,327 @@ public class Interpreter {
         throw new RuntimeException("No main method found in any class");
     }
 
-    /**
-     * Calls a specific method within a given class.
-     * @param className The name of the class containing the method.
-     * @param methodName The name of the method to call.
-     * @throws RuntimeException if the class or method is not found.
-     */
-    public void callMethod(String className, String methodName) {
+    public Object callMethod(String className, String methodName, List<Object> args) {
         ClassDeclaration cls = classes.get(className);
         if (cls == null) {
             throw new RuntimeException("Class not found: " + className);
         }
 
-        // Find the function (method) in the class body
         for (StatementNode member : cls.body()) {
             if (member instanceof FunctionDeclaration func && func.name().equals(methodName)) {
-                // Pass the class name to executeFunction so it knows its context
-                executeFunction(func, className);
-                return;
+                return executeFunction(func, className, args);
             }
         }
         throw new RuntimeException("Method " + methodName + " not found in class " + className);
     }
 
-    /**
-     * Executes the body of a function (method).
-     * Creates a new local scope for variables within this function.
-     * @param func The FunctionDeclaration AST node to execute.
-     * @param currentClassName The name of the class this function belongs to.
-     */
-    private void executeFunction(FunctionDeclaration func, String currentClassName) {
-        // Create a fresh local scope for variables for this function call
-        // In a real interpreter, you'd manage a stack of scopes for proper function calls.
+    public Object callMethod(String className, String methodName) {
+        return callMethod(className, methodName, List.of());
+    }
+
+    private Object executeFunction(FunctionDeclaration func, String currentClassName, List<Object> args) {
         locals = new HashMap<>();
 
-        for (StatementNode stmt : func.body()) {
-            // Pass the current class name to executeStatement
-            executeStatement(stmt, currentClassName);
+        List<String> paramNames = func.parameters();
+        if (args.size() != paramNames.size()) {
+            throw new RuntimeException(
+                    "Function " + func.name() + " expects " + paramNames.size() + " arguments but got " + args.size());
+        }
+
+        for (int i = 0; i < paramNames.size(); i++) {
+            locals.put(paramNames.get(i), args.get(i));
+        }
+
+        try {
+            for (StatementNode stmt : func.body()) {
+                executeStatement(stmt, currentClassName);
+            }
+        } catch (ReturnException r) {
+            return r.getValue();
+        }
+
+        return null;
+    }
+
+    private void executeForLoop(ForStatement forStmt, String currentClassName) {
+        // 1. Execute initialization statement
+        if (forStmt.getInit() != null) {
+            executeStatement(forStmt.getInit(), currentClassName);
+        }
+
+        // 2. Loop while condition is truthy
+        while (Utility.isTruthy(evaluateExpression(forStmt.getCondition(), currentClassName))) {
+            // Execute loop body
+            for (StatementNode stmt : forStmt.getBody()) {
+                executeStatement(stmt, currentClassName);
+            }
+
+            // Execute update expression after each iteration
+            if (forStmt.getIncrement() != null) {
+                evaluateExpression(forStmt.getIncrement(), currentClassName);
+            }
         }
     }
 
-    /**
-     * Executes a single statement.
-     * @param stmt The StatementNode AST node to execute.
-     * @param currentClassName The name of the class where this statement is being executed.
-     * @throws RuntimeException if the statement type is unsupported.
-     */
     private void executeStatement(StatementNode stmt, String currentClassName) {
         if (stmt instanceof VarDeclaration varDecl) {
-            // Evaluate the initial value and store it in local variables
-            Object value = evaluateExpression(varDecl.value());
+            Object value = evaluateExpression(varDecl.value(), currentClassName);
             locals.put(varDecl.name(), value);
 
         } else if (stmt instanceof PrintStatement printStmt) {
-            // Evaluate the expression and print its value to console
-            Object val = evaluateExpression(printStmt.expression());
+            Object val = evaluateExpression(printStmt.expression(), currentClassName);
             System.out.println(val);
 
         } else if (stmt instanceof ExpressionStatement exprStmt) {
-            // This handles expressions that are statements, like function calls
             if (exprStmt.expression() instanceof FunctionCall funcCall) {
-                // Dynamically call the method using the current class name
                 callMethod(currentClassName, funcCall.functionName());
             } else {
-                // If it's just an expression like '5 + 3;', evaluate it but discard the result
-                evaluateExpression(exprStmt.expression());
+                evaluateExpression(exprStmt.expression(), currentClassName);
             }
 
-        } else {
+        } else if (stmt instanceof ReturnStatement ret) {
+            Object value = null;
+            if (ret.value() != null) {
+                value = evaluateExpression(ret.value(), currentClassName);
+            }
+            throw new ReturnException(value);
+        } else if (stmt instanceof IfStatement ifStatement) {
+            executeIfStatement(ifStatement, currentClassName);
+        } else if (stmt instanceof WhileStatement whileStmt) {
+            while (Utility.isTruthy(evaluateExpression(whileStmt.getCondition(), currentClassName))) {
+                executeBlock(whileStmt.getBody(), currentClassName);
+            }
+        } else if (stmt instanceof ForStatement forStmt) {
+            executeForLoop(forStmt, currentClassName);
+        }
+
+        else {
             throw new RuntimeException("Unsupported statement: " + stmt.getClass().getSimpleName());
         }
     }
 
-    /**
-     * Evaluates an expression node and returns its computed value.
-     * This is the core logic for handling different types of expressions.
-     * @param expr The ExpressionNode AST node to evaluate.
-     * @return The result of the expression evaluation as an Object.
-     * @throws RuntimeException if the expression type is unsupported or if an operation is invalid.
-     */
-    private Object evaluateExpression(ExpressionNode expr) {
+    private Object executeBlock(List<StatementNode> statements, String currentClassName) {
+        Object lastResult = null;
+        for (StatementNode stmt : statements) {
+            executeStatement(stmt, currentClassName); // Passing null for currentClassName, or change if needed
+        }
+        return lastResult;
+    }
+
+    private Object executeIfStatement(IfStatement ifStmt, String currentClassName) {
+        Object conditionValue = evaluateExpression(ifStmt.getCondition(), currentClassName);
+        if (!(conditionValue instanceof Boolean)) {
+            throw new RuntimeException("Condition must evaluate to a boolean");
+        }
+
+        if ((Boolean) conditionValue) {
+            for (StatementNode stmt : ifStmt.getThenBranch()) {
+                executeStatement(stmt, currentClassName);
+            }
+        } else {
+            for (ElseIfBranch elseIf : ifStmt.getElseIfBranches()) {
+                Object elseIfCondition = evaluateExpression(elseIf.getCondition(), currentClassName);
+                if (!(elseIfCondition instanceof Boolean)) {
+                    throw new RuntimeException("Else-if condition must evaluate to a boolean");
+                }
+                if ((Boolean) elseIfCondition) {
+                    for (StatementNode stmt : elseIf.getBody()) {
+                        executeStatement(stmt, currentClassName);
+                    }
+                    return null;
+                }
+            }
+
+            if (ifStmt.getElseBranch() != null) {
+                for (StatementNode stmt : ifStmt.getElseBranch()) {
+                    executeStatement(stmt, currentClassName);
+                }
+            }
+        }
+        return null;
+    }
+
+    private Object evaluateExpression(ExpressionNode expr, String currentClassName) {
         if (expr instanceof NumberLiteral number) {
-            // Return the raw value for number literals (assuming Integer for now)
             return number.value;
 
         } else if (expr instanceof StringLiteral string) {
-            // Return the raw string value
             return string.value;
 
         } else if (expr instanceof Identifier ident) {
-            // Look up the variable's value in the local scope
             if (locals.containsKey(ident.name())) {
                 return locals.get(ident.name());
             } else {
                 throw new RuntimeException("Undefined variable: " + ident.name());
             }
 
+        } else if (expr instanceof VariableReference varRef) {
+            if (locals.containsKey(varRef.name())) {
+                return locals.get(varRef.name());
+            } else {
+                throw new RuntimeException("Undefined variable: " + varRef.name());
+            }
+
         } else if (expr instanceof BinaryExpression binExpr) {
-            // Recursively evaluate left and right operands
-            Object left = evaluateExpression(binExpr.left);
-            Object right = evaluateExpression(binExpr.right);
+            Object left = evaluateExpression(binExpr.left, currentClassName);
+            Object right = evaluateExpression(binExpr.right, currentClassName);
             String op = binExpr.operator;
 
-            // --- Handle operations on Integer operands ---
             if (left instanceof Integer l && right instanceof Integer r) {
-                switch (op) {
-                    // Arithmetic Operators
-                    case "+":
-                        return l + r;
-                    case "-":
-                        return l - r;
-                    case "*":
-                        return l * r;
-                    case "/":
-                        if (r == 0) {
+                return switch (op) {
+                    case "+" -> l + r;
+                    case "-" -> l - r;
+                    case "*" -> l * r;
+                    case "/" -> {
+                        if (r == 0)
                             throw new ArithmeticException("Division by zero");
-                        }
-                        return l / r;
-                    case "%":
-                        if (r == 0) {
+                        yield l / r;
+                    }
+                    case "%" -> {
+                        if (r == 0)
                             throw new ArithmeticException("Modulus by zero");
-                        }
-                        return l % r;
+                        yield l % r;
+                    }
+                    case "&" -> l & r;
+                    case "|" -> l | r;
+                    case "^" -> l ^ r;
+                    case "<<" -> l << r;
+                    case ">>" -> l >> r;
+                    case ">>>" -> l >>> r;
+                    case "==" -> l == r;
+                    case "!=" -> l != r;
+                    case ">" -> l > r;
+                    case "<" -> l < r;
+                    case ">=" -> l >= r;
+                    case "<=" -> l <= r;
+                    default -> throw new RuntimeException("Unsupported operator for integers: " + op);
+                };
 
-                    // Bitwise Operators
-                    case "&": // Bitwise AND
-                        return l & r;
-                    case "|": // Bitwise OR
-                        return l | r;
-                    case "^": // Bitwise XOR
-                        return l ^ r;
+            } else if (left instanceof Boolean bl && right instanceof Boolean br) {
+                return switch (op) {
+                    case "&&" -> bl && br;
+                    case "||" -> bl || br;
+                    case "==" -> bl == br;
+                    case "!=" -> bl != br;
+                    default -> throw new RuntimeException("Unsupported operator for booleans: " + op);
+                };
 
-                    // Shift Operators
-                    case "<<": // Left Shift
-                        return l << r;
-                    case ">>": // Signed Right Shift
-                        return l >> r;
-                    case ">>>": // Unsigned Right Shift (Zero-fill right shift)
-                        return l >>> r;
+            } else if (left instanceof Double dl && right instanceof Double dr) {
+                return switch (op) {
+                    case "+" -> dl + dr;
+                    case "-" -> dl - dr;
+                    case "*" -> dl * dr;
+                    case "/" -> {
+                        if (dr == 0.0)
+                            throw new ArithmeticException("Division by zero");
+                        yield dl / dr;
+                    }
+                    case "%" -> {
+                        if (dr == 0.0)
+                            throw new ArithmeticException("Modulus by zero");
+                        yield dl % dr;
+                    }
+                    case "==" -> dl == dr;
+                    case "!=" -> dl != dr;
+                    case ">" -> dl > dr;
+                    case "<" -> dl < dr;
+                    case ">=" -> dl >= dr;
+                    case "<=" -> dl <= dr;
+                    default -> throw new RuntimeException("Unsupported operator for doubles: " + op);
+                };
 
-                    // Relational Operators (return boolean)
-                    case "==":
-                        return l == r;
-                    case "!=":
-                        return l != r;
-                    case ">":
-                        return l > r;
-                    case "<":
-                        return l < r;
-                    case ">=":
-                        return l >= r;
-                    case "<=":
-                        return l <= r;
-
-                    default:
-                        throw new RuntimeException("Unsupported operator for integers: " + op);
-                }
-            }
-            // --- Handle operations on Boolean operands ---
-            else if (left instanceof Boolean bl && right instanceof Boolean br) {
-                switch (op) {
-                    // Logical Operators
-                    case "&&": // Logical AND
-                        return bl && br;
-                    case "||": // Logical OR
-                        return bl || br;
-
-                    // Equality for Booleans
-                    case "==":
-                        return bl == br;
-                    case "!=":
-                        return bl != br;
-
-                    default:
-                        throw new RuntimeException("Unsupported operator for booleans: " + op);
-                }
-            }
-            // --- Handle operations on Double operands (Example - extend for float/long if needed) ---
-            else if (left instanceof Double dl && right instanceof Double dr) {
-                switch (op) {
-                    // Arithmetic Operators
-                    case "+": return dl + dr;
-                    case "-": return dl - dr;
-                    case "*": return dl * dr;
-                    case "/":
-                        if (dr == 0.0) {
-                            throw new ArithmeticException("Division by zero (double)");
-                        }
-                        return dl / dr;
-                    case "%": // Modulus for doubles
-                        if (dr == 0.0) {
-                            throw new ArithmeticException("Modulus by zero (double)");
-                        }
-                        return dl % dr;
-
-                    // Relational Operators (return boolean)
-                    case "==": return dl == dr;
-                    case "!=": return dl != dr;
-                    case ">": return dl > dr;
-                    case "<": return dl < dr;
-                    case ">=": return dl >= dr;
-                    case "<=": return dl <= dr;
-
-                    default:
-                        throw new RuntimeException("Unsupported operator for doubles: " + op);
-                }
-            }
-            // --- Handle String concatenation ---
-            else if (op.equals("+") && (left instanceof String || right instanceof String)) {
-                // If either operand is a String, perform string concatenation
+            } else if (op.equals("+") && (left instanceof String || right instanceof String)) {
                 return String.valueOf(left) + String.valueOf(right);
-            }
-            // --- No compatible types found for the given operator ---
-            else {
+            } else {
                 throw new RuntimeException("Unsupported operand types for operator '" + op + "': " +
                         (left != null ? left.getClass().getSimpleName() : "null") + " and " +
                         (right != null ? right.getClass().getSimpleName() : "null"));
             }
+        } else if (expr instanceof UnaryExpression unary) {
+            Object operand = evaluateExpression(unary.operand, currentClassName);
+            String op = unary.operator;
+
+            if (operand instanceof Integer i) {
+                return switch (op) {
+                    case "-" -> -i;
+                    case "+" -> +i;
+                    case "~" -> ~i;
+                    default -> throw new RuntimeException("Unsupported unary operator for int: " + op);
+                };
+            } else if (operand instanceof Boolean b) {
+                return switch (op) {
+                    case "!" -> !b;
+                    default -> throw new RuntimeException("Unsupported unary operator for boolean: " + op);
+                };
+            } else {
+                throw new RuntimeException("Unsupported unary operand type: " + operand.getClass().getSimpleName());
+            }
+        } else if (expr instanceof IncrementExpression inc) {
+            if (!locals.containsKey(inc.variableName())) {
+                throw new RuntimeException("Undefined variable: " + inc.variableName());
+            }
+            Object current = locals.get(inc.variableName());
+            if (!(current instanceof Integer)) {
+                throw new RuntimeException("Can only increment/decrement integers");
+            }
+            int value = (int) current;
+            int newVal = inc.operator().equals("++") ? value + 1 : value - 1;
+            locals.put(inc.variableName(), newVal);
+            return inc.isPrefix() ? newVal : value;
+        } else if (expr instanceof AssignmentExpression assign) {
+            String varName = assign.name();
+            Object value = evaluateExpression(assign.right(), currentClassName);
+
+            if (!locals.containsKey(varName) && !assign.isCompound()) {
+                throw new RuntimeException("Variable '" + varName + "' is not declared");
+            }
+
+            if (assign.isCompound()) {
+                Object current = locals.get(varName);
+                value = applyOperator(assign.operator(), current, value);
+            }
+
+            locals.put(varName, value);
+            return value;
+        } else if (expr instanceof CompoundAssignmentExpression compoundAssign) {
+            String varName = compoundAssign.variableName;
+            String op = compoundAssign.operator.replace("=", ""); // "+=" → "+"
+            Object right = evaluateExpression(compoundAssign.value, currentClassName);
+
+            if (!locals.containsKey(varName)) {
+                throw new RuntimeException("Variable '" + varName + "' is not declared");
+            }
+
+            Object left = locals.get(varName);
+            Object result = applyOperator(op, left, right);
+            locals.put(varName, result);
+            return result;
+        } else if (expr instanceof FunctionCall funcCall) {
+            List<Object> args = funcCall.arguments().stream()
+                    .map(arg -> evaluateExpression(arg, currentClassName))
+                    .toList();
+            return callMethod(currentClassName, funcCall.functionName(), args);
         }
-        // --- Handle other expression types (e.g., UnaryExpression, FunctionCallExpression if they return a value) ---
-        // If an expression type is not handled, it's an unsupported expression
+
         throw new RuntimeException("Unsupported expression: " + expr.getClass().getSimpleName());
+    }
+
+    private Object applyOperator(String operator, Object left, Object right) {
+        if (left instanceof Integer l && right instanceof Integer r) {
+            return switch (operator) {
+                case "+" -> l + r;
+                case "-" -> l - r;
+                case "*" -> l * r;
+                case "/" -> l / r;
+                case "%" -> l % r;
+                default -> throw new RuntimeException("Unsupported operator: " + operator);
+            };
+        }
+
+        if (left instanceof String l && operator.equals("+")) {
+            return l + right;
+        }
+
+        throw new RuntimeException("Invalid operands for operator '" + operator + "': " + left + ", " + right);
     }
 }
