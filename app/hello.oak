@@ -1,16 +1,15 @@
-class Ritik {
-    def sum(a, b) {
+class Student{
+    def sum(a,b){
         return a + b;
     }
-
-    def main() {
-        var i=0;
-        while (i < 10) {
-            i = i + 1;
-            if (i == 5) {
-                break; 
-            }
-            print("Current value of i: " + i);
+    def main(){
+        print(12+432-5474/64);
+        print(sum(10,25));
+        var arr = list(1,2,3,4,5);
+        for (var i : arr) {
+            print(i);
         }
+
+        
     }
 }

@@ -30,6 +30,12 @@ public class Parser {
     }
 
     private StatementNode parseStatement() {
+
+        if (match(TokenType.KEYWORD, "list")) {
+            ExpressionNode listExpr = parseListLiteral();
+            return new ExpressionStatement(listExpr);
+        }
+
         if (checkKeyword("if")) {
             return parseIfStatement();
         }
@@ -41,7 +47,7 @@ public class Parser {
         if (checkKeyword("for")) {
             return parseForStatement();
         }
-        if(match(TokenType.KEYWORD, "break")) {
+        if (match(TokenType.KEYWORD, "break")) {
             consume(TokenType.DELIMITER, ";");
             return (StatementNode) new BreakStatement();
         }
@@ -118,6 +124,18 @@ public class Parser {
         consume(TokenType.KEYWORD, "for"); // consume 'for'
         consume(TokenType.DELIMITER, "("); // consume '('
 
+        if (match(TokenType.KEYWORD, "var")) {
+            // Parsing for-each loop like: for (var i : arr)
+            String varName = consume(TokenType.IDENTIFIER).getValue();
+            consume(TokenType.DELIMITER, ":");
+            ExpressionNode iterable = parseExpression();
+            consume(TokenType.DELIMITER, ")");
+
+            List<StatementNode> body = parseBlock();
+
+            return new ForEachStatement(varName, iterable, body);
+        }
+
         StatementNode init = null;
         if (!check(TokenType.DELIMITER, ";")) {
             if (match(TokenType.KEYWORD, "var")) {
@@ -152,6 +170,21 @@ public class Parser {
         return new ForStatement(init, condition, increment, body);
     }
     // ---- Expression Parsing ----
+
+    private ExpressionNode parseListLiteral() {
+        consume(TokenType.DELIMITER, "("); // Expect '(' after 'list'
+
+        List<ExpressionNode> elements = new ArrayList<>();
+        if (!check(TokenType.DELIMITER, ")")) {
+            do {
+                elements.add(parseExpression());
+            } while (match(TokenType.DELIMITER, ","));
+        }
+
+        consume(TokenType.DELIMITER, ")");
+
+        return new ListLiteral(elements);
+    }
 
     private ExpressionNode parseExpression() {
         return parseAssignment();
@@ -251,11 +284,12 @@ public class Parser {
     private ExpressionNode parseMultiplication() {
         ExpressionNode expr = parseExponent();
         // while (match(TokenType.OPERATOR, "*", "/", "%", "//")) {
-        //     String operator = previous().getValue();
-        //     ExpressionNode right = parseExponent();
-        //     expr = new BinaryExpression(expr, operator, right);
+        // String operator = previous().getValue();
+        // ExpressionNode right = parseExponent();
+        // expr = new BinaryExpression(expr, operator, right);
         // }
-        while (match(TokenType.OPERATOR, "*") || match(TokenType.OPERATOR, "/") || match(TokenType.OPERATOR, "%") || match(TokenType.OPERATOR, "//")) {
+        while (match(TokenType.OPERATOR, "*") || match(TokenType.OPERATOR, "/") || match(TokenType.OPERATOR, "%")
+                || match(TokenType.OPERATOR, "//")) {
             String operator = previous().getValue();
             ExpressionNode right = parseExponent();
             expr = new BinaryExpression(expr, operator, right);
@@ -406,6 +440,13 @@ public class Parser {
             return expr;
         }
 
+        if (match(TokenType.KEYWORD, "list")) {
+            return parseListLiteral();
+        }
+
+       
+
+        System.err.println("[Debug] Unexpected token at parsePrimary: " + peek());
         throw error(peek(), "Expected an expression");
     }
 
@@ -497,6 +538,16 @@ public class Parser {
             return tokens.get(tokens.size() - 1); // or return a special EOF token
         }
         return tokens.get(index);
+    }
+
+    private boolean lookAhead(int n, TokenType type) {
+        Token token = lookAhead(n);
+        return token.getType() == type;
+    }
+
+    private boolean lookAhead(int n, TokenType type, String value) {
+        Token token = lookAhead(n);
+        return token.getType() == type && token.getValue().equals(value);
     }
 
     private Token currentToken() {

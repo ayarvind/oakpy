@@ -147,7 +147,17 @@ public class Interpreter {
             throw new ContinueException();
         } else if (stmt instanceof BreakStatement) {
             throw new BreakException();
-        }
+        }else if(stmt instanceof ForEachStatement forEachStmt) {
+            Object iterable = evaluateExpression(forEachStmt.getIterable(), currentClassName);
+            if (!(iterable instanceof List<?> list)) {
+                throw new RuntimeException("For-each loop requires an iterable, got: " + iterable.getClass().getSimpleName());
+            }
+
+            for (Object item : list) {
+                locals.put(forEachStmt.getVariableName(), item);
+                executeBlock(forEachStmt.getBody(), currentClassName);
+            }
+        } 
 
         else {
             throw new RuntimeException("Unsupported statement: " + stmt.getClass().getSimpleName());
@@ -367,6 +377,11 @@ public class Interpreter {
                     .map(arg -> evaluateExpression(arg, currentClassName))
                     .toList();
             return callMethod(currentClassName, funcCall.functionName(), args);
+        } else if (expr instanceof ListLiteral listLiteral) {
+            return listLiteral.elements.stream()
+                    .map(element -> evaluateExpression(element, currentClassName))
+                    .toList();
+
         }
 
         throw new RuntimeException("Unsupported expression: " + expr.getClass().getSimpleName());

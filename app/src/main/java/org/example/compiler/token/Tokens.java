@@ -9,7 +9,7 @@ public class Tokens {
             "if", "else", "while", "for", "switch","in",
             "break", "continue", "throw", "try", "catch",
             "finally", "import", "export", "new", "this", "super",
-
+            "list","map","set", "tuple",
             "case", "return", "print");
 
     public static final Set<String> OPERATORS = Set.of(
