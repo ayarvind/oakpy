@@ -8,6 +8,7 @@ public class Tokens {
             "class", "interface", "const", "var", "def",
             "if", "else", "while", "for", "switch","in",
             "break", "continue", "throw", "try", "catch",
+            "true", "false", "null",
             "finally", "import", "export", "new", "this", "super",
             "list","map","set", "tuple",
             "case", "return", "print");

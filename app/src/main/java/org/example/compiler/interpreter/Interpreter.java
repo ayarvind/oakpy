@@ -2,7 +2,10 @@ package org.example.compiler.interpreter;
 
 import org.example.compiler.ast.*;
 
+import java.lang.reflect.Array;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -52,7 +55,7 @@ public class Interpreter {
     }
 
     public Object callMethod(String className, String methodName) {
-        return callMethod(className, methodName, List.of());
+        return callMethod(className, methodName, new ArrayList<>());
     }
 
     private Object executeFunction(FunctionDeclaration func, String currentClassName, List<Object> args) {
@@ -147,20 +150,70 @@ public class Interpreter {
             throw new ContinueException();
         } else if (stmt instanceof BreakStatement) {
             throw new BreakException();
-        }else if(stmt instanceof ForEachStatement forEachStmt) {
+        } else if (stmt instanceof ForEachStatement forEachStmt) {
             Object iterable = evaluateExpression(forEachStmt.getIterable(), currentClassName);
             if (!(iterable instanceof List<?> list)) {
-                throw new RuntimeException("For-each loop requires an iterable, got: " + iterable.getClass().getSimpleName());
+                throw new RuntimeException(
+                        "For-each loop requires an iterable, got: " + iterable.getClass().getSimpleName());
             }
 
             for (Object item : list) {
                 locals.put(forEachStmt.getVariableName(), item);
                 executeBlock(forEachStmt.getBody(), currentClassName);
             }
-        } 
+        } else if (stmt instanceof ForEachStatement forEachStmt) {
+            executeForEachLoop(forEachStmt, currentClassName);
+        }
 
         else {
             throw new RuntimeException("Unsupported statement: " + stmt.getClass().getSimpleName());
+        }
+    }
+
+    private void executeForEachLoop(ForEachStatement forEachStmt, String currentClassName) {
+        Object iterableObj = evaluateExpression(forEachStmt.getIterable(), currentClassName);
+
+        Iterable<?> iterable;
+
+        if (iterableObj instanceof List<?> list) {
+            iterable = list;
+        } else if (iterableObj instanceof String str) {
+            // Create iterable over string characters as Objects
+            iterable = () -> new Iterator<Object>() {
+                int index = 0;
+
+                public boolean hasNext() {
+                    return index < str.length();
+                }
+
+                public Object next() {
+                    return str.charAt(index++);
+                }
+            };
+        } else {
+            throw new RuntimeException(
+                    "For-each loop requires an iterable, got: " + iterableObj.getClass().getSimpleName());
+        }
+
+        loop: for (Object item : iterable) {
+            // Set loop variable
+            locals.put(forEachStmt.getVariableName(), item);
+
+            try {
+                for (StatementNode stmt : forEachStmt.getBody()) {
+                    try {
+                        executeStatement(stmt, currentClassName);
+                    } catch (ContinueException ce) {
+                        // continue next iteration
+                        continue loop;
+                    } catch (BreakException be) {
+                        // break out of loop
+                        break loop;
+                    }
+                }
+            } catch (BreakException be) {
+                break;
+            }
         }
     }
 
@@ -206,7 +259,10 @@ public class Interpreter {
     }
 
     private Object evaluateExpression(ExpressionNode expr, String currentClassName) {
-        if (expr instanceof NumberLiteral number) {
+        if (expr instanceof BooleanLiteral bool) {
+            return bool.value;
+
+        } else if (expr instanceof NumberLiteral number) {
             return number.value;
 
         } else if (expr instanceof StringLiteral string) {
@@ -271,6 +327,8 @@ public class Interpreter {
                 return switch (op) {
                     case "&&" -> bl && br;
                     case "||" -> bl || br;
+                    case "&" -> bl & br; // bitwise AND for booleans
+                    case "|" -> bl | br; // bitwise OR for booleans
                     case "==" -> bl == br;
                     case "!=" -> bl != br;
                     default -> throw new RuntimeException("Unsupported operator for booleans: " + op);
@@ -373,15 +431,176 @@ public class Interpreter {
             locals.put(varName, result);
             return result;
         } else if (expr instanceof FunctionCall funcCall) {
-            List<Object> args = funcCall.arguments().stream()
-                    .map(arg -> evaluateExpression(arg, currentClassName))
-                    .toList();
+            List<Object> args = new ArrayList<>();
+            for (ExpressionNode arg : funcCall.arguments()) {
+                args.add(evaluateExpression(arg, currentClassName));
+            }
             return callMethod(currentClassName, funcCall.functionName(), args);
         } else if (expr instanceof ListLiteral listLiteral) {
-            return listLiteral.elements.stream()
-                    .map(element -> evaluateExpression(element, currentClassName))
-                    .toList();
+            List<Object> evaluatedElements = new ArrayList<>();
+            for (ExpressionNode element : listLiteral.elements) {
+                evaluatedElements.add(evaluateExpression(element, currentClassName));
+            }
+            return evaluatedElements;
 
+        } else if (expr instanceof IndexExpression indexExpr) {
+            Object target = evaluateExpression(indexExpr.getTarget(), currentClassName);
+            Object indexObj = evaluateExpression(indexExpr.getIndex(), currentClassName);
+
+            if (!(indexObj instanceof Integer index)) {
+                throw new RuntimeException("Index must be an integer");
+            }
+
+            if (target instanceof List<?> list) {
+                if (index < 0 || index >= list.size()) {
+                    throw new RuntimeException("Index out of bounds: " + index);
+                }
+                return list.get(index);
+
+            } else if (target instanceof String str) {
+                if (index < 0 || index >= str.length()) {
+                    throw new RuntimeException("Index out of bounds: " + index);
+                }
+                return String.valueOf(str.charAt(index));
+
+            } else {
+                throw new RuntimeException(
+                        "Indexing requires a list or string, got: " + target.getClass().getSimpleName());
+            }
+        } else if (expr instanceof PropertyAccess propAccess) {
+            Object target = evaluateExpression(propAccess.target, currentClassName);
+            String property = propAccess.property;
+
+            if (target instanceof List<?> list && property.equals("length")) {
+                return list.size();
+            }
+
+            throw new RuntimeException(
+                    "Property '" + property + "' not supported on " + target.getClass().getSimpleName());
+        } else if (expr instanceof TernaryExpression ternary) {
+            Object cond = evaluateExpression(ternary.condition, currentClassName);
+            if (!(cond instanceof Boolean)) {
+                throw new RuntimeException("Ternary condition must be a boolean");
+            }
+            return (Boolean) cond
+                    ? evaluateExpression(ternary.trueExpr, currentClassName)
+                    : evaluateExpression(ternary.falseExpr, currentClassName);
+        }
+
+        else if (expr instanceof MethodCall methodCall) {
+            Object target = evaluateExpression(methodCall.target, currentClassName);
+            String method = methodCall.methodName;
+            List<Object> args = new ArrayList<>();
+            for (ExpressionNode arg : methodCall.arguments) {
+                args.add(evaluateExpression(arg, currentClassName));
+            }
+
+            if (target instanceof ArrayList<?> list) {
+                @SuppressWarnings("unchecked")
+                ArrayList<Object> mutableList = (ArrayList<Object>) list;
+
+                return switch (method) {
+                    case "append" -> {
+                        if (args.size() != 1)
+                            throw new RuntimeException("append expects 1 argument");
+                        mutableList.add(args.get(0));
+                        yield null;
+                    }
+                    case "pop" -> {
+                        if (!args.isEmpty())
+                            throw new RuntimeException("pop takes no arguments");
+                        if (mutableList.isEmpty())
+                            throw new RuntimeException("Cannot pop from empty list");
+                        yield mutableList.remove(mutableList.size() - 1);
+                    }
+                    case "remove" -> {
+                        if (args.size() != 1)
+                            throw new RuntimeException("remove expects 1 argument");
+                        if (!(args.get(0) instanceof Integer index))
+                            throw new RuntimeException("remove expects integer index");
+                        if (index < 0 || index >= mutableList.size())
+                            throw new RuntimeException("Index out of bounds");
+                        yield mutableList.remove((int) index);
+                    }
+                    case "insert" -> {
+                        if (args.size() != 2)
+                            throw new RuntimeException("insert expects 2 arguments: index and value");
+                        if (!(args.get(0) instanceof Integer index))
+                            throw new RuntimeException("insert expects integer index");
+                        if (index < 0 || index > mutableList.size())
+                            throw new RuntimeException("Index out of bounds");
+                        mutableList.add(index, args.get(1));
+                        yield null;
+                    }
+                    case "clear" -> {
+                        mutableList.clear();
+                        yield null;
+                    }
+                    case "indexOf" -> {
+                        if (args.size() != 1)
+                            throw new RuntimeException("indexOf expects 1 argument");
+                        int index = mutableList.indexOf(args.get(0));
+                        if (index == -1)
+                            throw new RuntimeException("Element not found in list");
+                        yield index;
+                    }
+                    case "contains" -> {
+                        if (args.size() != 1)
+                            throw new RuntimeException("contains expects 1 argument");
+                        yield mutableList.contains(args.get(0));
+                    }
+                    case "reverse" -> {
+                        if (!args.isEmpty())
+                            throw new RuntimeException("reverse takes no arguments");
+                        java.util.Collections.reverse(mutableList);
+                        yield null;
+                    }
+                    case "sort" -> {
+                        if (!args.isEmpty())
+                            throw new RuntimeException("sort takes no arguments");
+                        mutableList.sort(null); // natural order sort
+                        yield null;
+                    }
+
+                    default -> throw new RuntimeException("Unknown list method: " + method);
+                };
+            } else if (target instanceof String str) {
+                return switch (method) {
+                    case "length" -> {
+                        if (!args.isEmpty())
+                            throw new RuntimeException("length() takes no arguments");
+                        yield str.length();
+                    }
+                    case "toUpperCase" -> {
+                        if (!args.isEmpty())
+                            throw new RuntimeException("toUpperCase() takes no arguments");
+                        yield str.toUpperCase();
+                    }
+                    case "toLowerCase" -> {
+                        if (!args.isEmpty())
+                            throw new RuntimeException("toLowerCase() takes no arguments");
+                        yield str.toLowerCase();
+                    }
+                    case "substring" -> {
+                        if (args.size() == 1 && args.get(0) instanceof Integer start) {
+                            yield str.substring(start);
+                        } else if (args.size() == 2 && args.get(0) instanceof Integer start
+                                && args.get(1) instanceof Integer end) {
+                            yield str.substring(start, end);
+                        } else {
+                            throw new RuntimeException("substring expects 1 or 2 integer arguments");
+                        }
+                    }
+                    case "contains" -> {
+                        if (args.size() != 1 || !(args.get(0) instanceof String))
+                            throw new RuntimeException("contains expects 1 string argument");
+                        yield str.contains((String) args.get(0));
+                    }
+                    default -> throw new RuntimeException("Unknown string method: " + method);
+                };
+            }
+
+            throw new RuntimeException("Method '" + method + "' not supported on " + target.getClass().getSimpleName());
         }
 
         throw new RuntimeException("Unsupported expression: " + expr.getClass().getSimpleName());

@@ -124,53 +124,75 @@ public class Parser {
         consume(TokenType.KEYWORD, "for"); // consume 'for'
         consume(TokenType.DELIMITER, "("); // consume '('
 
-        if (match(TokenType.KEYWORD, "var")) {
-            // Parsing for-each loop like: for (var i : arr)
+        if (match(TokenType.KEYWORD, "var")) { // consume 'var'
             String varName = consume(TokenType.IDENTIFIER).getValue();
-            consume(TokenType.DELIMITER, ":");
-            ExpressionNode iterable = parseExpression();
+
+            if (check(TokenType.DELIMITER, ":")) {
+                // For-each loop: for (var x : collection)
+                consume(TokenType.DELIMITER, ":");
+                ExpressionNode iterable = parseExpression();
+                consume(TokenType.DELIMITER, ")");
+
+                List<StatementNode> body = parseBlock();
+                return new ForEachStatement(varName, iterable, body);
+            } else if (check(TokenType.OPERATOR, "=")) {
+                // Classic for loop: for (var i = 0; i < 10; i = i + 1)
+                consume(TokenType.OPERATOR, "=");
+                ExpressionNode initValue = parseExpression();
+                consume(TokenType.DELIMITER, ";");
+
+                ExpressionNode condition = null;
+                if (!check(TokenType.DELIMITER, ";")) {
+                    condition = parseExpression();
+                }
+                consume(TokenType.DELIMITER, ";");
+
+                ExpressionNode increment = null;
+                if (!check(TokenType.DELIMITER, ")")) {
+                    increment = parseExpression();
+                }
+                consume(TokenType.DELIMITER, ")");
+
+                List<StatementNode> body = parseBlock();
+                VarDeclaration init = new VarDeclaration(varName, initValue);
+                return new ForStatement(init, condition, increment, body);
+            } else {
+                throw new RuntimeException("Expected ':' or '=' after variable name in for loop");
+            }
+        } else {
+            // Non-var for loop header — e.g., for(i=0; ...)
+            StatementNode init = null;
+            if (!check(TokenType.DELIMITER, ";")) {
+                if (match(TokenType.KEYWORD, "var")) {
+                    String name = consume(TokenType.IDENTIFIER).getValue();
+                    consume(TokenType.OPERATOR, "=");
+                    ExpressionNode value = parseExpression();
+                    init = new VarDeclaration(name, value);
+                } else {
+                    ExpressionNode expr = parseExpression();
+                    init = new ExpressionStatement(expr);
+                }
+            }
+            consume(TokenType.DELIMITER, ";");
+
+            ExpressionNode condition = null;
+            if (!check(TokenType.DELIMITER, ";")) {
+                condition = parseExpression();
+            }
+            consume(TokenType.DELIMITER, ";");
+
+            ExpressionNode increment = null;
+            if (!check(TokenType.DELIMITER, ")")) {
+                increment = parseExpression();
+            }
             consume(TokenType.DELIMITER, ")");
 
             List<StatementNode> body = parseBlock();
-
-            return new ForEachStatement(varName, iterable, body);
+            return new ForStatement(init, condition, increment, body);
         }
-
-        StatementNode init = null;
-        if (!check(TokenType.DELIMITER, ";")) {
-            if (match(TokenType.KEYWORD, "var")) {
-                // parse var declaration without consuming trailing semicolon here
-                String name = consume(TokenType.IDENTIFIER).getValue();
-                consume(TokenType.OPERATOR, "=");
-                ExpressionNode value = parseExpression();
-                // do NOT consume the semicolon here
-                init = new VarDeclaration(name, value);
-            } else {
-                // parse expression statement without trailing semicolon
-                ExpressionNode expr = parseExpression();
-                init = new ExpressionStatement(expr);
-            }
-        }
-        consume(TokenType.DELIMITER, ";");
-
-        ExpressionNode condition = null;
-        if (!check(TokenType.DELIMITER, ";")) {
-            condition = parseExpression();
-        }
-        consume(TokenType.DELIMITER, ";");
-
-        ExpressionNode increment = null;
-        if (!check(TokenType.DELIMITER, ")")) {
-            increment = parseExpression();
-        }
-        consume(TokenType.DELIMITER, ")");
-
-        List<StatementNode> body = parseBlock();
-
-        return new ForStatement(init, condition, increment, body);
     }
-    // ---- Expression Parsing ----
 
+    
     private ExpressionNode parseListLiteral() {
         consume(TokenType.DELIMITER, "("); // Expect '(' after 'list'
 
@@ -187,7 +209,13 @@ public class Parser {
     }
 
     private ExpressionNode parseExpression() {
-        return parseAssignment();
+        ExpressionNode expr = parseAssignment();
+
+        if (match(TokenType.DELIMITER, "?")) { // '?' token found
+            expr = parseTernaryOperator(expr);
+        }
+
+        return expr;
     }
 
     private ExpressionNode parseLogicalOr() {
@@ -269,6 +297,17 @@ public class Parser {
             expr = new BinaryExpression(expr, operator, right);
         }
         return expr;
+    }
+
+    private ExpressionNode parseTernaryOperator(ExpressionNode condition) {
+        // '?' already consumed by match() caller
+        ExpressionNode trueExpr = parseExpression();
+
+        consume(TokenType.DELIMITER, ":", "Expected ':' in ternary operator");
+
+        ExpressionNode falseExpr = parseExpression();
+
+        return new TernaryExpression(condition, trueExpr, falseExpr);
     }
 
     private ExpressionNode parseAddition() {
@@ -422,32 +461,54 @@ public class Parser {
     }
 
     private ExpressionNode parsePrimary() {
-        if (match(TokenType.NUMBER)) {
-            return new NumberLiteral(Integer.parseInt(previous().getValue()));
-        }
-
-        if (match(TokenType.STRING)) {
-            return new StringLiteral(previous().getValue());
-        }
-
-        if (match(TokenType.IDENTIFIER)) {
-            return new VariableReference(previous().getValue());
-        }
-
-        if (match(TokenType.DELIMITER, "(")) {
-            ExpressionNode expr = parseExpression();
+        ExpressionNode expr;
+        if (match(TokenType.KEYWORD, "true") || match(TokenType.KEYWORD, "false")) {
+            String val = previous().getValue();
+            return new BooleanLiteral(Boolean.parseBoolean(val));
+        } else if (match(TokenType.NUMBER)) {
+            expr = new NumberLiteral(Integer.parseInt(previous().getValue()));
+        } else if (match(TokenType.STRING)) {
+            expr = new StringLiteral(previous().getValue());
+        } else if (match(TokenType.IDENTIFIER)) {
+            expr = new VariableReference(previous().getValue());
+        } else if (match(TokenType.DELIMITER, "(")) {
+            expr = parseExpression();
             consume(TokenType.DELIMITER, ")");
-            return expr;
+        } else if (match(TokenType.KEYWORD, "list")) {
+            expr = parseListLiteral();
+        } else {
+            System.err.println("[Debug] Unexpected token at parsePrimary: " + peek());
+            throw error(peek(), "Expected an expression");
         }
 
-        if (match(TokenType.KEYWORD, "list")) {
-            return parseListLiteral();
+        // Now handle indexing (e.g., arr[0][1])
+        while (true) {
+            if (match(TokenType.DELIMITER, "[")) {
+                ExpressionNode index = parseExpression();
+                consume(TokenType.DELIMITER, "]");
+                expr = new IndexExpression(expr, index);
+            } else if (match(TokenType.DELIMITER, ".")) {
+                String name = consume(TokenType.IDENTIFIER).getValue();
+
+                // Check if it's a method call like .append()
+                if (match(TokenType.DELIMITER, "(")) {
+                    List<ExpressionNode> args = new ArrayList<>();
+                    if (!check(TokenType.DELIMITER, ")")) {
+                        do {
+                            args.add(parseExpression());
+                        } while (match(TokenType.DELIMITER, ","));
+                    }
+                    consume(TokenType.DELIMITER, ")");
+                    expr = new MethodCall(expr, name, args);
+                } else {
+                    expr = new PropertyAccess(expr, name);
+                }
+            } else {
+                break;
+            }
         }
 
-       
-
-        System.err.println("[Debug] Unexpected token at parsePrimary: " + peek());
-        throw error(peek(), "Expected an expression");
+        return expr;
     }
 
     // ---- Utility Methods ----

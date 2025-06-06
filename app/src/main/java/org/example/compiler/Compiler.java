@@ -50,6 +50,9 @@ public class Compiler {
             List<Token> tokens = lexer.tokenize();
             // print tokens for debugging
             // print all tokens
+            // for (Token token : tokens) {
+            //     System.out.println(token);
+            // }
 
             // 2. Parse to AST
 
