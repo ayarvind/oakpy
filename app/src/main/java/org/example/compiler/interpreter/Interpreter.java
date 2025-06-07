@@ -2,12 +2,12 @@ package org.example.compiler.interpreter;
 
 import org.example.compiler.ast.*;
 
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class Interpreter {
     private static class ContinueException extends RuntimeException {
@@ -26,6 +26,15 @@ public class Interpreter {
             }
         }
         runMain();
+    }
+
+    private String valueToString(Object val) {
+        if (val instanceof List<?> list) {
+            return list.stream()
+                    .map(this::valueToString)
+                    .collect(Collectors.joining(", ", "[", "]"));
+        }
+        return String.valueOf(val); // handles primitives, strings, null
     }
 
     private void runMain() {
@@ -110,21 +119,22 @@ public class Interpreter {
         }
     }
 
-    private void executeStatement(StatementNode stmt, String currentClassName) {
+    private Object executeStatement(StatementNode stmt, String currentClassName) {
         if (stmt instanceof VarDeclaration varDecl) {
             Object value = evaluateExpression(varDecl.value(), currentClassName);
             locals.put(varDecl.name(), value);
-
+            return null;
         } else if (stmt instanceof PrintStatement printStmt) {
             Object val = evaluateExpression(printStmt.expression(), currentClassName);
-            System.out.println(val);
-
+            System.out.println(valueToString(val));
+            return null;
         } else if (stmt instanceof ExpressionStatement exprStmt) {
             if (exprStmt.expression() instanceof FunctionCall funcCall) {
                 callMethod(currentClassName, funcCall.functionName());
             } else {
                 evaluateExpression(exprStmt.expression(), currentClassName);
             }
+            return null;
 
         } else if (stmt instanceof ReturnStatement ret) {
             Object value = null;
@@ -134,6 +144,7 @@ public class Interpreter {
             throw new ReturnException(value);
         } else if (stmt instanceof IfStatement ifStatement) {
             executeIfStatement(ifStatement, currentClassName);
+            return null;
         } else if (stmt instanceof WhileStatement whileStmt) {
             loop: while (Utility.isTruthy(evaluateExpression(whileStmt.getCondition(), currentClassName))) {
                 try {
@@ -144,8 +155,10 @@ public class Interpreter {
                     break loop;
                 }
             }
+            return null;
         } else if (stmt instanceof ForStatement forStmt) {
             executeForLoop(forStmt, currentClassName);
+            return null;
         } else if (stmt instanceof ContinueStatement) {
             throw new ContinueException();
         } else if (stmt instanceof BreakStatement) {
@@ -161,8 +174,10 @@ public class Interpreter {
                 locals.put(forEachStmt.getVariableName(), item);
                 executeBlock(forEachStmt.getBody(), currentClassName);
             }
+            return null;
         } else if (stmt instanceof ForEachStatement forEachStmt) {
             executeForEachLoop(forEachStmt, currentClassName);
+            return null;
         }
 
         else {
@@ -222,6 +237,28 @@ public class Interpreter {
         for (StatementNode stmt : statements) {
             executeStatement(stmt, currentClassName);
         }
+        return lastResult;
+    }
+
+    private Object executeBlock(List<StatementNode> statements, Map<String, Object> localScope,
+            ObjectInstance instance) {
+        Object previousThis = locals.get("this"); // Save previous this
+        Map<String, Object> previousLocals = new HashMap<>(locals); // Save outer locals
+
+        // Use provided locals and set 'this'
+        locals = localScope;
+        locals.put("this", instance);
+
+        Object lastResult = null;
+        for (StatementNode stmt : statements) {
+            lastResult = executeStatement(stmt, instance.getClassDecl().name());
+        }
+
+        locals = previousLocals; // Restore outer locals
+        if (previousThis != null) {
+            locals.put("this", previousThis);
+        }
+
         return lastResult;
     }
 
@@ -364,7 +401,26 @@ public class Interpreter {
                     default -> throw new RuntimeException("Unsupported operator for doubles: " + op);
                 };
 
-            } else if (op.equals("+") && (left instanceof String || right instanceof String)) {
+            }
+            // for string
+            else if (left instanceof String sl && right instanceof String sr) {
+                return switch (op) {
+                    case "+" -> sl + sr; // string concatenation
+                    case "==" -> sl.equals(sr);
+                    case "!=" -> !sl.equals(sr);
+                    case "<" -> sl.compareTo(sr) < 0;
+                    case ">" -> sl.compareTo(sr) > 0;
+                    case "<=" -> sl.compareTo(sr) <= 0;
+                    case ">=" -> sl.compareTo(sr) >= 0;
+                    default -> throw new RuntimeException("Unsupported operator for strings: " + op);
+                };
+
+            } else if (op.equals("==") || op.equals("!=")) {
+                return left == null ? right == null : left.equals(right);
+
+            }
+
+            else if (op.equals("+") && (left instanceof String || right instanceof String)) {
                 return String.valueOf(left) + String.valueOf(right);
             } else {
                 throw new RuntimeException("Unsupported operand types for operator '" + op + "': " +
@@ -439,10 +495,13 @@ public class Interpreter {
         } else if (expr instanceof ListLiteral listLiteral) {
             List<Object> evaluatedElements = new ArrayList<>();
             for (ExpressionNode element : listLiteral.elements) {
-                evaluatedElements.add(evaluateExpression(element, currentClassName));
+                Object value = evaluateExpression(element, currentClassName);
+                evaluatedElements.add(value);
             }
             return evaluatedElements;
 
+        } else if (expr instanceof ThisExpression) {
+            return locals.get("this");
         } else if (expr instanceof IndexExpression indexExpr) {
             Object target = evaluateExpression(indexExpr.getTarget(), currentClassName);
             Object indexObj = evaluateExpression(indexExpr.getIndex(), currentClassName);
@@ -470,6 +529,9 @@ public class Interpreter {
         } else if (expr instanceof PropertyAccess propAccess) {
             Object target = evaluateExpression(propAccess.target, currentClassName);
             String property = propAccess.property;
+            if (target instanceof ObjectInstance instance) {
+                return instance.getField(property);
+            }
 
             if (target instanceof List<?> list && property.equals("length")) {
                 return list.size();
@@ -601,6 +663,23 @@ public class Interpreter {
             }
 
             throw new RuntimeException("Method '" + method + "' not supported on " + target.getClass().getSimpleName());
+        } else if (expr instanceof NewObjectExpression newExpr) {
+            // Find the class declaration by name (you should have some way to get it)
+            ClassDeclaration classDecl = findClassDeclaration(newExpr.getClassName());
+            if (classDecl == null) {
+                throw new RuntimeException("Class not found: " + newExpr.getClassName());
+            }
+
+            ObjectInstance instance = new ObjectInstance(classDecl);
+
+            List<Object> argValues = new ArrayList<>();
+            for (ExpressionNode arg : newExpr.getArguments()) {
+                argValues.add(evaluateExpression(arg, currentClassName));
+            }
+
+            callConstructor(instance, argValues);
+
+            return instance;
         }
 
         throw new RuntimeException("Unsupported expression: " + expr.getClass().getSimpleName());
@@ -624,4 +703,45 @@ public class Interpreter {
 
         throw new RuntimeException("Invalid operands for operator '" + operator + "': " + left + ", " + right);
     }
+
+    public ClassDeclaration findClassDeclaration(String className) {
+        ClassDeclaration classDecl = classes.get(className);
+        if (classDecl == null) {
+            throw new RuntimeException("Class not found: " + className);
+        }
+        return classDecl;
+    }
+
+    private void callConstructor(ObjectInstance instance, List<Object> args) {
+        ClassDeclaration classDecl = instance.getClassDecl();
+
+        // Find a method with the same name as the class (conventionally the
+        // constructor)
+        for (FunctionDeclaration method : classDecl.body().stream()
+                .filter(stmt -> stmt instanceof FunctionDeclaration)
+                .map(stmt -> (FunctionDeclaration) stmt)
+                .collect(Collectors.toList())) {
+            if (method.name().equals(classDecl.name())) {
+                // Match parameters count
+                if (method.parameters().size() != args.size()) {
+                    throw new RuntimeException("Constructor argument count mismatch");
+                }
+
+                // Prepare local environment for constructor
+                Map<String, Object> constructorLocals = new HashMap<>();
+
+                // Add parameters to local scope
+                for (int i = 0; i < method.parameters().size(); i++) {
+                    String paramName = method.parameters().get(i);
+                    constructorLocals.put(paramName, args.get(i));
+                }
+
+                // Execute constructor body
+                executeBlock(method.body(), constructorLocals, instance);
+                return;
+            }
+        }
+
+    }
+
 }

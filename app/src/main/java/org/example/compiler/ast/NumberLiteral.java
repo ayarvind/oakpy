@@ -1,9 +1,9 @@
 package org.example.compiler.ast;
 
 public class NumberLiteral implements ExpressionNode {
-    public final int value;
+    public final Number value;
 
-    public NumberLiteral(int value) {
-        this.value = value;
+    public NumberLiteral(Number numberValue) {
+        this.value = numberValue;
     }
 }

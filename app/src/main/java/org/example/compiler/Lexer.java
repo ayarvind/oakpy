@@ -23,13 +23,14 @@ public class Lexer {
             char current = peek();
 
             if (Character.isWhitespace(current)) {
-                if (current == '\n') line++;
+                if (current == '\n')
+                    line++;
                 advance();
             } else if (Character.isLetter(current) || current == '_') {
                 tokenizeIdentifierOrKeyword();
             } else if (Character.isDigit(current)) {
                 tokenizeNumber();
-            } else if (current == '"') {
+            } else if (current == '"' || current == '\'') {
                 tokenizeString();
             } else if (current == '/' && peekNext() == '/') {
                 skipLineComment();
@@ -68,6 +69,16 @@ public class Lexer {
             sb.append(peek());
             advance();
         }
+        if (pos < code.length() && peek() == '.' && pos + 1 < code.length()
+                && Character.isDigit(code.charAt(pos + 1))) {
+            sb.append(peek()); 
+            advance();
+            while (pos < code.length() && Character.isDigit(peek())) {
+                sb.append(peek());
+                advance();
+            }
+        }
+
         tokens.add(new Token(TokenType.NUMBER, sb.toString(), line));
     }
 
@@ -75,7 +86,8 @@ public class Lexer {
         advance(); // Skip opening quote
         StringBuilder sb = new StringBuilder();
         while (pos < code.length() && peek() != '"') {
-            if (peek() == '\n') line++;
+            if (peek() == '\n')
+                line++;
             sb.append(peek());
             advance();
         }
@@ -103,7 +115,7 @@ public class Lexer {
                 tokens.add(new Token(TokenType.OPERATOR, sb.toString(), line));
                 return;
             }
-            sb.setLength(1); 
+            sb.setLength(1);
         }
 
         tokens.add(new Token(TokenType.OPERATOR, sb.toString(), line));

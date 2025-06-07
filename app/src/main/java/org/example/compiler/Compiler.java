@@ -56,16 +56,22 @@ public class Compiler {
 
             // 2. Parse to AST
 
-            // try {
+            try {
                 Parser parser = new Parser(tokens);
                 ClassDeclaration classNode = parser.parseClass();
 
                 // 3. Interpret the AST
                 Interpreter interpreter = new Interpreter();
                 interpreter.executeProgram(List.of(classNode));
-            // } catch (Exception e) {
-            //     System.out.println(e.getMessage());
-            // }
+            } catch (Exception e) {
+                if(e instanceof IndexOutOfBoundsException){
+                    System.out.println("Empty file or no class found.");
+
+                }else{
+                    System.err.println(e.getMessage());
+                }
+
+            }
         } else {
             System.err.println("Cannot compile: file was not read successfully.");
         }

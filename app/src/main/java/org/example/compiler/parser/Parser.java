@@ -192,7 +192,6 @@ public class Parser {
         }
     }
 
-    
     private ExpressionNode parseListLiteral() {
         consume(TokenType.DELIMITER, "("); // Expect '(' after 'list'
 
@@ -466,7 +465,16 @@ public class Parser {
             String val = previous().getValue();
             return new BooleanLiteral(Boolean.parseBoolean(val));
         } else if (match(TokenType.NUMBER)) {
-            expr = new NumberLiteral(Integer.parseInt(previous().getValue()));
+            String val = previous().getValue();
+            Number numberValue;
+            if (val.contains(".")) {
+                // Parse as double
+                numberValue = Double.parseDouble(val);
+            } else {
+                // Parse as integer
+                numberValue = Integer.parseInt(val);
+            }
+            expr = new NumberLiteral(numberValue);
         } else if (match(TokenType.STRING)) {
             expr = new StringLiteral(previous().getValue());
         } else if (match(TokenType.IDENTIFIER)) {
@@ -476,6 +484,13 @@ public class Parser {
             consume(TokenType.DELIMITER, ")");
         } else if (match(TokenType.KEYWORD, "list")) {
             expr = parseListLiteral();
+        } else if (match(TokenType.KEYWORD, "new")) {
+            String className = consume(TokenType.IDENTIFIER).getValue();
+            consume(TokenType.DELIMITER, "(");
+            consume(TokenType.DELIMITER, ")");
+            return new NewObjectExpression(className, null);
+        }else if(match(TokenType.KEYWORD,"this")){
+            return new ThisExpression();
         } else {
             System.err.println("[Debug] Unexpected token at parsePrimary: " + peek());
             throw error(peek(), "Expected an expression");

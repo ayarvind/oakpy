@@ -1,16 +1,41 @@
-class Student {
-    def main() {
-        var arr = list(
-            "Alice",
-            "Bob",
-            "Charlie",
-            "David",
-            "Eve"
-        );
-
-        
-        for (var x : arr) {
-            print(x);
-        }
+class Stack {
+    def Stack() {
+        this.items = list(); // Initialize an empty list
     }
+
+    def push(item) {
+        this.items.append(item);
+    }
+
+    def pop() {
+        if (this.items.length == 0) {
+            return null;
+        }
+        return this.items.remove(this.items.length - 1);
+    }
+
+    def peek() {
+        if (this.items.length == 0) {
+            return null;
+        }
+        return this.items[this.items.length - 1];
+    }
+
+    def isEmpty() {
+        return this.items.length == 0;
+    }
+
+    def size() {
+        return this.items.length;
+    }
+}
+
+def main() {
+    var stack = new Stack();
+    stack.push(10);
+    stack.push(20);
+    print(stack.peek());  // prints 20
+    print(stack.pop());   // prints 20
+    print(stack.pop());   // prints 10
+    print(stack.pop());   // prints null
 }
